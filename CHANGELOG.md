@@ -2,13 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
-## [5.7.1-dev.6] - 2026-10-09
+## [5.7.1] - 2026-10-09
 
 ### Changed — 机器人通道的 `/链接` 提示：不再让用户"调整页面缩放"，改为指引官方字号设置
 
 用户："第三方软件输入/链接的回复也应该改一下了，把调整页面缩放改成在通用设置里改字号。"
 
-插件在窄屏注入的 `html{zoom:80%}` 已删除（见 5.7.1-dev.3 / dev.5），
+插件在窄屏注入的 `html{zoom:80%}` 已删除（见下方 Removed / Reverted 两节），
 所以旧提示 *"手机浏览器可根据需要调整页面缩放…"* 已经指向一个我们不再做的方向 ——
 而且那条 zoom 本身会把 `vw` 打坏。改为：
 
@@ -25,8 +25,6 @@ All notable changes to this project will be documented in this file.
 守卫 #33 相应更新，并加了一条新断言：**`lib/index.mjs` 里再出现「页面缩放」直接判失败**
 （防止有人把旧提示抄回来）。文案仍只允许出现在 `LINK_MOBILE_HINT` 定义那一处，
 5 个通道（微信 / 飞书 / Telegram / QQ / 钉钉）继续共用同一条。
-
-## [5.7.1-dev.5] - 2026-10-09
 
 ### Reverted — 撤掉 dev.4 给右侧栏加的底色（它就是"窄屏变纯色"的原因）
 
@@ -54,8 +52,6 @@ All notable changes to this project will be documented in this file.
 > 教训：`position:fixed; inset:0` 的元素**加底色就等于画满整个视口**。
 > 在这种元素上补背景前，先想清楚它是不是本来就是全屏覆盖的。
 
-## [5.7.1-dev.4] - 2026-10-09
-
 ### Fixed — 右侧栏铺满后，底下的内容"透上来"
 
 用户截图反馈：右侧栏全屏了（"开始" + 卡片确实占满），但**主对话 composer 里的两个附件卡片
@@ -82,8 +78,6 @@ body.webrm-mobile [data-sidebar-right-panel="fullscreen"]{
 > 注：这不算我引入的 bug —— 官方自己的 fullscreen 分支同样只给 `width:100vw`、不带背景。
 > 只是以前它压根没铺满过（被 zoom 坑），所以没人看见。
 
-## [5.7.1-dev.3] - 2026-10-09
-
 ### Removed — 删掉 `@media(max-width:768px){html{zoom:80%}}`（"移动端视觉缩小"）
 
 用户决定：**"去掉 80%，现在没有侧边栏，而且设置里有官方的字体大小设置，不需要 80% 了。"**
@@ -105,8 +99,6 @@ body.webrm-mobile [data-sidebar-right-panel="fullscreen"]{
 
 > 右侧栏那条 `position:fixed + inset:0` **保留**：zoom 删除后官方自己的 `100vw` 理应也能铺满，
 > 但这条不依赖 `vw` 的实现是一层保险（守卫里也禁止它用 `vw`）。
-
-## [5.7.1-dev.2] - 2026-10-09
 
 ### Fixed — 手机上打开右侧栏没有真的全屏（顺便做了现场取证）
 

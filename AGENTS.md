@@ -51,17 +51,41 @@ node <workspace>/rail-check.mjs     # 窄屏适配层的行为桩（30 条）
 
 守卫是"结构断言"，行为桩是"真跑一遍"。**只有守卫过不代表能用** —— 加新逻辑时两边都要补。
 
+## ⛔ 绝对不要 push / fetch（GitHub 另有专门的会话负责）
+
+**这个仓库的 GitHub 侧由另一个专门的会话管理。本会话只负责本地 git。**
+
+- **不要 `git push`** —— 无论改动多么"显然该上去了"
+- **不要 `git fetch` / `git pull`** —— 那也是网络操作，会改动远端引用
+- 本地 `git commit` 随便做 ✓（这是本会话该干的）
+
+⚠ 为什么必须写死这条：这台机器上 `credential.helper = manager`
+（Git Credential Manager，三级都配好了），**`git push` 会直接复用已有的 GitHub 凭据、
+静默成功、不问一句** —— 也就是说"不小心推上去"这个失误在这里是**默认行为**，
+没有任何阻力挡着它。只能靠这条纪律。踩过：我连续推了 9 个提交。
+
 ## 部署（改完不部署 = 没改）
 
+**提交到本地** → 两个 profile 都指向**本地路径**（避免依赖 GitHub SHA）：
+
+```jsonc
+"dsh-web-remote": "link:E:\\DeepSeek Harness\\.dsh\\packages\\dsh-web-remote"
 ```
-编辑 checkout → npm test → commit → push
-  → profiles/web 与 profiles/desktop **两个都**换 pin
+
+```
+编辑 checkout → npm test → git commit（**不 push**）
+  → profiles/desktop 与 profiles/web **两个都**改成/保持本地 link
   → 各自 pnpm install
-  → 核对安装副本与工作树逐字节相同
+  → 核对安装副本与工作树一致
 ```
 
 **只更新一个 profile 会让另一端看不到改动**（桌面端走的是 `desktop` profile，踩过）。
-`pnpm install` 会把手动拷进去的文件按 pin 还原 —— 所以只能走"push + 换 pin"这条路。
+`pnpm install` 会把手动拷进去的文件按 pin 还原 —— 所以要么走本地 link，要么等
+**GitHub 会话推完、再由它或我们换 SHA**；**不要自己 push 去凑那个 SHA**。
+
+> 历史包袱：这两个 profile 长期用的是 `github:godchen520/dsh-web-remote#<sha>`。
+> 那种 pin 要求提交已在远端 —— 这正是我当初越界 push 的直接诱因。
+> 改用 `link:` 本地路径可以彻底断掉这条依赖。
 
 ## 窄屏适配层的既有事实（改之前先读）
 
