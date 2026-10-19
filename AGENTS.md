@@ -64,28 +64,67 @@ node <workspace>/rail-check.mjs     # 窄屏适配层的行为桩（30 条）
 静默成功、不问一句** —— 也就是说"不小心推上去"这个失误在这里是**默认行为**，
 没有任何阻力挡着它。只能靠这条纪律。踩过：我连续推了 9 个提交。
 
-## 部署（改完不部署 = 没改）
+## 部署：两个 profile 都用 **GitHub pin**（用户 2026-10-12 决定"都改回 pin"）
 
-**提交到本地** → 两个 profile 都指向**本地路径**（避免依赖 GitHub SHA）：
+> 历史：2026-10-11 曾改成 `link:` 本地路径（理由是"不要再依赖 GitHub"），
+> 2026-10-12 用户改主意，**两个 profile 都改回 pin**。
+> 现在的形态：`node_modules/dsh-web-remote` 是**真实目录**（不是 Junction），
+> 内容来自 GitHub 上那个提交的 tarball。
+
+两个 profile 的依赖写法（**当前值 = v5.7.1 发布提交**）：
 
 ```jsonc
-"dsh-web-remote": "link:E:\\DeepSeek Harness\\.dsh\\packages\\dsh-web-remote"
+"dsh-web-remote": "github:godchen520/dsh-web-remote#d2a669b87c0e6ce9be2bdd2b28d404c89dbc04dd"
 ```
 
+**所以我的本地改动不会自动生效** —— pin 是远端快照。完整循环是：
+
 ```
-编辑 checkout → npm test → git commit（**不 push**）
-  → profiles/desktop 与 profiles/web **两个都**改成/保持本地 link
-  → 各自 pnpm install
-  → 核对安装副本与工作树一致
+我：改 checkout → npm test → **本地 git commit（绝不 push）**
+GitHub 会话：推送 + 发布（squash 成 release 提交）
+我（或它）：两个 profile 都换 pin → 各自 pnpm install → 重启 DSH
 ```
 
-**只更新一个 profile 会让另一端看不到改动**（桌面端走的是 `desktop` profile，踩过）。
-`pnpm install` 会把手动拷进去的文件按 pin 还原 —— 所以要么走本地 link，要么等
-**GitHub 会话推完、再由它或我们换 SHA**；**不要自己 push 去凑那个 SHA**。
+⚠ **两个 profile 必须换成同一个 SHA**（桌面端走的是 `desktop` profile）——
+只改一个会让另一端看不到改动，踩过。
 
-> 历史包袱：这两个 profile 长期用的是 `github:godchen520/dsh-web-remote#<sha>`。
-> 那种 pin 要求提交已在远端 —— 这正是我当初越界 push 的直接诱因。
-> 改用 `link:` 本地路径可以彻底断掉这条依赖。
+### `link:` 的坑（万一以后又改回本地路径，先读这段）
+
+**pnpm 把 `link:` 目标当"本地包"，不会装它自己的 `dependencies`**；而 Node 解析
+`import` 走的是 **Junction 的真实路径**（`packages/dsh-web-remote/lib/…`），
+只会往 `packages/node_modules`、`.dsh/node_modules` 找 —— **profile 的 node_modules
+根本不在查找链上**。
+
+2026-10-11 实际踩到：改成 `link:` 后漏了在 checkout 装依赖 → **所有依赖 SDK 的通道全哑**
+（QQ 扫码报"扫码 SDK 未安装"、飞书/钉钉连不上），**只有微信正常**（微信不依赖 SDK）。
+修法是 `cd packages/dsh-web-remote && npm install`（仓库自带 package-lock.json）。
+
+**改回 pin 之后这个问题自动消失** —— 正规包安装会把插件依赖装进各自 profile 的
+`node_modules`，四个 SDK 都从插件目录能 `import` 到（已验证）。
+
+四个 SDK（`package.json` 的 `dependencies`）：
+
+| 包 | 用途 |
+|---|---|
+| `@tencent-connect/qqbot-connector` | QQ 扫码绑定（`startQrConnect`） |
+| `@tencent-connect/qqbot-nodejs` | QQ 连接（`QQBot`） |
+| `@larksuiteoapi/node-sdk` | 飞书 |
+| `dingtalk-stream` | 钉钉 |
+
+**验证方法**（别只 `require.resolve` 包名根路径 —— 这些包是 `"type":"module"`，
+`require` 会有 CJS/ESM 互操作假象，看着像缺文件其实没缺）：
+
+```powershell
+cd <profile>\node_modules\dsh-web-remote
+node --input-type=module -e "await import('@tencent-connect/qqbot-connector'); console.log('ok')"
+```
+
+⚠ 为什么曾经有 push 事故：两个 profile 长期写 `github:godchen520/dsh-web-remote#<sha>`，
+**那种 pin 要求提交必须已经在 GitHub 上**，而当时我以为"要部署就得先推" ——
+这就是我越界 push 9 个提交的直接诱因。**正确做法是等 GitHub 会话推，不要自己推。**
+
+> 中间短暂改成 `link:` 的那一天，插件管理器会把它标成「本地开发」、市场不再推更新提示；
+> **改回 pin 后这些副作用都没了** —— 市场照常跟踪、能收到更新提示。
 
 ## 窄屏适配层的既有事实（改之前先读）
 

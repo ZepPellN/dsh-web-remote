@@ -2586,6 +2586,69 @@ await new Promise((res, rej) => {
   console.log('40. 版本号约定 OK（' + v + ' —— 格式合法 + CHANGELOG 有对应条目且为最新）');
 }
 
+// 41. QQ markdown 适配：只对 QQ 生效（监听通知 + 指令回复），且转换器必须真的存在
+//
+// 背景：QQ 官方文本消息（msg_type=0）不渲染 Markdown，所以会话里的表格/加粗
+// 全变成一堆符号。官方 markdown 消息（msg_type=2）单聊/群聊已对所有机器人开放、
+// **无需申请权限**，但**不支持表格** → 必须把表格降级成列表。
+//
+// 这里只做**结构断言**（转换结果对不对由 test/test-qqmd.mjs 用真实用例覆盖）。
+{
+  const qq = fs.readFileSync(new URL('../lib/qqbot.mjs', import.meta.url), 'utf8');
+  const idx = fs.readFileSync(new URL('../lib/index.mjs', import.meta.url), 'utf8');
+
+  if (!/export function toQQMarkdown\(/.test(qq)) {
+    console.error('41. qqbot.mjs 没有导出 toQQMarkdown —— QQ 的 markdown 降级转换器不见了');
+    process.exit(1);
+  }
+  if (!/export function convertQQTables\(/.test(qq)) {
+    console.error('41. 缺少 convertQQTables —— QQ markdown 不支持表格，必须降级成列表');
+    process.exit(1);
+  }
+  // 转换器必须真的做这三件事（少一件就会漏符号到用户手机上）
+  if (!/convertQQTables\(s\)/.test(qq)) {
+    console.error('41. toQQMarkdown 没有调用 convertQQTables —— 表格不会被降级');
+    process.exit(1);
+  }
+  if (qq.indexOf('!\\[[^\\]]*\\]\\([^)]*\\)') < 0) {
+    console.error('41. toQQMarkdown 没有删除 markdown 图片引用 —— 图片会重复或显示成坏链');
+    process.exit(1);
+  }
+  // 发送路径：必须由 opts.md 控制，且缺 sendMarkdown 时能退回 sendText
+  if (qq.indexOf('opts && opts.md') < 0) {
+    console.error('41. sendRaw 没有识别 opts.md');
+    process.exit(1);
+  }
+  if (!/typeof bot\.sendMarkdown === 'function'/.test(qq)) {
+    console.error('41. 没有对 sendMarkdown 做存在性判断 —— 旧版 SDK 会直接发不出去');
+    process.exit(1);
+  }
+  if (!/bot\.sendMarkdown\(tgt, parts\[i\]\)/.test(qq)) {
+    console.error('41. sendRaw 在 markdown 模式下没有真的调用 sendMarkdown');
+    process.exit(1);
+  }
+  // 指令回复也要走 markdown（用户 2026-10-19 决定）：通道内的回复发送点必须传 md
+  if (!/await sendRaw\(\{[^}]*\}, reply, \{ md: true \}\)/.test(qq)) {
+    console.error('41. QQ 指令回复没有走 markdown —— /历史内容 这类带表格的回复会满屏符号');
+    process.exit(1);
+  }
+  // 只有 QQ 的监听通知走 markdown；其它通道一律不许被带上 md:true
+  if (!/qqbotChannel\.send\(qqTarget, text, \{ md: true \}\)/.test(idx)) {
+    console.error('41. 监听通知没有以 markdown 模式发给 QQ —— 用户看到的还是满屏符号');
+    process.exit(1);
+  }
+  const mdTrue = (idx.match(/\{ md: true \}/g) || []).length;
+  if (mdTrue !== 1) {
+    console.error('41. 有 ' + mdTrue + ' 处 md:true —— 只允许 QQ 监听通知这一处（其它通道不渲染 markdown）');
+    process.exit(1);
+  }
+  if (/feishuSendText\([^)]*md: true|telegramChannel\.send\([^)]*md: true|dingtalkChannel\.send\([^)]*md: true/.test(idx)) {
+    console.error('41. 把 md:true 传给了不渲染 markdown 的通道（飞书/纸飞机/钉钉）');
+    process.exit(1);
+  }
+  console.log('41. QQ markdown 适配 OK（转换器存在 + 表格降级 + 图片删除 + 监听通知与指令回复都走 markdown + 旧 SDK 可退回文本）');
+}
+
 proxy.close();
 target.close();
 console.log('ALL TESTS DONE');
