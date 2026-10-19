@@ -115,7 +115,53 @@
 
 ---
 
-## 6. 踩过的坑（血泪记录）
+## 6. 发布到 npm（**只有 npm 插件需要**）
+
+> `dsh-web-remote` **不发 npm**（走 GitHub 安装）✅
+> 这一节是给 `@godchen520/dsh-web-search-bing` 这类 npm 插件用的。
+
+### 正常流程
+
+1. 在 GitHub 上**发布 Release** → 工作流 `publish.yml` **自动触发**（`on: release: [published]`）✅
+2. 工作流会：装依赖 → 跑测试 → 升级 npm → 查幂等 → `npm publish --provenance --access public` ✅
+3. 认证走 **Trusted Publishing（OIDC）**，**不需要任何 npm 令牌** ✅
+
+### ⚠️ 发布失败时，按这个顺序查
+
+| # | 检查 | 说明 |
+|:--:|------|------|
+| 1 | **npm 的 Trusted Publisher 配置还在吗** | 去 `https://www.npmjs.com/package/<包名>/access` 看有没有那条绑定记录 —— **这是最常见的失败原因** ✅ |
+| 2 | 绑定参数对不对 | Repository = `godchen520/<仓库名>`、Workflow filename = `publish.yml`、**Environment 留空**、勾上 **Allow npm publish** ✅ |
+| 3 | 看 CI 日志里的 `Publish` 步骤 | 其他步骤全过、只有它挂 → 就是 npm 授权问题 ✅ |
+
+### 🕳️ 踩过的坑（2026-10-18 实战）
+
+| 现象 | 真相 |
+|------|------|
+| `npm error code E404 - PUT ...` | **404 不是「包不存在」，是 npm 认证失败的伪装** ✅（npm 故意不回 401，避免泄露包是否存在） |
+| `provenance` 签名成功，但发布失败 | 签名只说明 **GitHub 成功签发了 OIDC 令牌** ✅ npm 端仍可能拒绝 ✅ 两者独立 |
+| 同一个工作流，10 天前能发、现在不能 | **npm 的 Trusted Publisher 配置会失效**（政策变动时被清掉）✅ → 重新建一次即可 ✅ |
+| 配置页显示 `Pending validation` | 正常 ✅ **发一次就自动验证通过**（页面会写一个截止时间）✅ |
+| 本地 `npm whoami` 返回 401 | 本地 `.npmrc` 里的令牌过期了 ✅ **别指望本地手动发** → 走 Trusted Publishing 才是正路 ✅ |
+| 发布成功但 registry 查不到 | 正常 ✅ npm 提示 "being processed and may take a few minutes" ✅ 等 1~2 分钟即可 ✅ |
+
+### ✅ 验证发布成功
+
+CI 日志里出现这一行就是成功：
+
+```
++ @godchen520/dsh-web-search-bing@1.2.3
+```
+
+然后查 registry（两个源都查，镜像可能更慢）：
+
+```bash
+npm view <包名> versions
+```
+
+---
+
+## 7. 踩过的坑（血泪记录）
 
 | 坑 | 教训 |
 |----|------|
@@ -125,9 +171,14 @@
 | 版本号从 5.7.2 想发成 5.6.6 | **版本号只能往上走** |
 | Release 正文写得太技术 | 用户看的是 Release；技术细节折叠进 `<details>` |
 | 推一堆小提交 | 它们会变成用户在市场里看到的「更新内容」→ **发布前 squash** |
+| 钉标签安装（`#v1.2.3`） | 市场**永远显示「已是最新」** → 安装命令不要钉 ref |
+| npm 发布 404 | **404 ≠ 包不存在**，是认证失败的伪装 → 先查 Trusted Publisher 配置 |
+| 发布后往 main 推非版本提交 | 市场按「main 的头」判断更新 → **所有用户都会收到「有新版本」噪音** |
 
 ---
 
-## 7. 一句话版
+## 8. 一句话版
 
 > **本地随便提交；发布前 squash 成一个提交 + 合并 CHANGELOG + 去掉 dev 后缀；测试过了才推；推完打标签写 Release；最后两个 profile 都要装。**
+>
+> **npm 插件多发一步：Release 会自动触发 npm 发布 —— 失败先查 Trusted Publisher 配置。**
