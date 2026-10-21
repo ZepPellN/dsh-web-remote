@@ -2664,6 +2664,44 @@ await new Promise((res, rej) => {
   console.log('41. QQ markdown 适配 OK（无任何"降级"残留 + 图片引用删除保留 + 监听通知与指令回复都走 markdown + 旧 SDK 可退回文本）');
 }
 
+// 42. 监听定时器必须按**所有通道**的开关恢复，不能只看微信
+//
+// 踩过的 bug（2026-10-19，用户在桌面端报"QQ 监听启用了但没用"）：
+//   启动恢复段里只有**微信**那两处会调 startMonitor()，且条件是 monitor.weixin.enabled；
+//   其它通道只把自己的开关恢复成 true，没人启动定时器。
+//   于是"微信监听关 + 只开 QQ 监听"时：qqbotMonitorMode=true（面板显示监听开）
+//   但 timerAlive=false → 每轮扫描不发生 → 一条通知都不推。
+//   取证：/remote/diag 显示 timerAlive=False / qqbotMode=True / lastNotifyAt=(从未触发)；
+//   用户重发一次 /监听（走运行期那条 startMonitor）后立刻 timerAlive=True、qqbot 已发送。
+{
+  const idx = fs.readFileSync(new URL('../lib/index.mjs', import.meta.url), 'utf8');
+  const code = idx.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '');
+
+  // ① 必须存在"统一兜底"：用 anyMonitorOn() 判断后再 startMonitor()
+  if (!/if \(anyMonitorOn\(\)\) \{\s*startMonitor\(\);/.test(code)) {
+    console.error('42. 找不到"按所有通道开关统一启动监听定时器"的兜底 —— 只开 QQ/钉钉/纸飞机时监听会整个不工作（踩过）');
+    process.exit(1);
+  }
+  // ② 那个兜底必须真的在启动流程里（在 dingtalk 的 8000ms 之后），不能只是定义了没人调
+  const dtAt = code.indexOf("}, 8000);");
+  const guardAt = code.indexOf('if (anyMonitorOn()) {');
+  if (dtAt < 0 || guardAt < 0 || guardAt < dtAt) {
+    console.error('42. 统一兜底不在启动流程末尾（应在最后一个通道的启动 setTimeout 之后）—— 可能早于各通道开关恢复，判断会失真');
+    process.exit(1);
+  }
+  // ③ 兜底里必须覆盖"全关则不启动"
+  if (!/if \(!anyMonitorOn\(\)\) stopMonitor\(\);/.test(code)) {
+    console.error('42. 统一兜底缺少"所有通道都关 → 不启动定时器"的分支');
+    process.exit(1);
+  }
+  // ④ 关掉的通道不能被启动时错误地恢复成开（钉钉原本就没查凭证）
+  if (!/if \(\(store\.load\(\)\.dingtalk \|\| \{\}\)\.monitor\)/.test(code)) {
+    console.error('42. 钉钉监听的启动恢复不见了');
+    process.exit(1);
+  }
+  console.log('42. 监听定时器启动 OK（按所有通道开关统一判断 + 全关不启动 + 位于各通道恢复之后）');
+}
+
 proxy.close();
 target.close();
 console.log('ALL TESTS DONE');

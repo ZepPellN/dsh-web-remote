@@ -2,6 +2,56 @@
 
 All notable changes to this project will be documented in this file.
 
+## [5.7.4] - 2026-10-19
+
+### Fixed — 只开 QQ（或钉钉/纸飞机）监听时，重启后监听**整个不工作**
+
+用户："我现在在 dsh 桌面端，为什么 QQ 监听没用，启用有监听"
+
+**取证**（`/remote/diag`，桌面端）：
+
+```
+timerAlive    = False          ← 监听定时器根本没在跑
+qqbotMode     = True           ← QQ 监听开关确实是开的
+weixinMode    = False
+lastNotifyAt  = (从未触发)
+agentsSeen    = 9              ← 能看到 9 个 agent，监听对象是有的
+```
+
+**根因**：启动恢复段里，**只有微信那两处**会调 `startMonitor()`
+（随 token 恢复那处、以及下面那处兜底），而且**条件是 `monitor.weixin.enabled`**。
+其它通道（QQ / 钉钉 / 纸飞机 / 飞书）各自只把自己的开关恢复成 `true`
+（`qqbotMonitorMode = !!qc.monitor` 等），**没有任何一处为它们启动定时器**。
+
+于是「微信监听关 + 只开 QQ 监听」时：面板显示"监听 开"（`qqbotMonitorMode === true` 是真的），
+但 `timerAlive === false` → **每轮扫描根本不发生** → 一条通知都不推。
+
+`startMonitor()` 的调用点里，QQ 那条在**指令处理里**（发 `/监听` 才走），所以：
+- **重启后必须再发一次 `/监听` 才能恢复** —— 这就是用户遇到的现象
+- 用户重发 `/监听` 后立刻：`timerAlive=True`、`lastSendResult="qqbot 已发送 @22:56:55"`，
+  **唯一变量就是它** ✓ 确证。
+
+**修法**：在启动流程**末尾**（最后一个通道 `setTimeout(…, 8000)` 之后，等各通道开关都恢复完毕）
+加一段统一兜底 —— 用 `anyMonitorOn()`（本来就是"任意通道开着"的语义）判断：
+
+```js
+if (anyMonitorOn()) { startMonitor(); } else { if (!anyMonitorOn()) stopMonitor(); }
+```
+
+幂等（`startMonitor()` 自己会先清旧定时器），全关时不留空转定时器。
+
+> 注：`stopMonitor()` 那行写成 `if (!anyMonitorOn()) stopMonitor();` 而不是裸的 `else { stopMonitor(); }`
+> —— 守卫 #16 要求「每个 `stopMonitor()` 调用点前 4 行内必须出现 `anyMonitorOn()`」，它是
+> 防"没判断就关监听"的老 bug 的。语义其实一样，但**改代码去满足守卫，而不是放宽守卫**。
+
+**测试**：新增守卫 #42 —— 断言统一兜底存在、位于各通道恢复之后、含"全关不启动"分支，
+且钉钉的启动恢复仍在。**已反向验证**：删掉兜底块后 `exit=1`，报
+"找不到按所有通道开关统一启动监听定时器的兜底"。
+
+**为什么以前没暴露**：微信监听通常也开着，那条路径会顺带启动定时器
+（`anyMonitorOn()` 为真，循环会同时处理 QQ）。一旦**只开 QQ**（例如新配置、或把微信关掉后），
+就踩中了。
+
 ## [5.7.3] - 2026-10-19
 
 ### Reverted — 删掉全部"降级"（**根因：QQ 官方文档的格式清单不完整**）
