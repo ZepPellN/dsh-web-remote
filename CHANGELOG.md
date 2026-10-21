@@ -2,6 +2,56 @@
 
 All notable changes to this project will be documented in this file.
 
+## [5.7.5] - 2026-10-21
+
+### Fixed — 桌面端公网/局域网链接全部 `502 Bad Gateway`（web 端正常）
+
+用户："我用 web 端时是好的，现在换到桌面端就这样了" + "公网和局域网链接都显示 bad gateway"
+
+**取证**（桌面端 `/remote/info`）：
+
+```
+targetPort = 19387      ← 代理转发到这里
+19387      = 没有监听  ← 转发过去没人接 → bad gateway
+实际监听    = 11849      ← 桌面端这次分到的端口
+```
+
+**根因：桌面版端口是宿主每次启动动态分配的，而这个值被写死了。**
+
+`profiles/desktop/cordis.patch.yml` 里有一段（上一版加的）：
+
+```yaml
+- id: web-remote
+  name: dsh-web-remote
+  config:
+    targetPort: 19387      # ← 上一台实例的端口，这次分到了 11849
+```
+
+web 端固定 `3080`，所以代理对得上、一直正常；桌面端换端口就必然对不上。
+
+**修法（这一版做对的两件事）**：
+
+1. **删掉 profile 里写死的 `targetPort`**（已改，那个 profile 的 `cordis.patch.yml` 现在只留注释说明为什么不能写死）
+2. **插件改为向宿主校准端口**：在 `webServer` 服务就绪后调用
+   `ctx.webServer.getOrigin()` 拿真实监听地址，写回 `config.targetPort`，
+   然后**才**建代理（校准点在 `createProxyServer()` 之前，`token reader` 也用校准后的值）。
+   显式配置仍优先（`portSource === 'config'` 时不覆盖），留给特殊部署。
+
+**为什么不能靠 `DSH_WEB_URL`**（这条也踩过，值得记下）：
+
+DSH 文档里 `surfaceContext` 的原文是
+*"Expose `DSH_WEB_URL` to the agent's shell commands"* ——
+**它只注入给 agent 的 shell 命令，不在插件进程的环境里**。
+所以插件里 `process.env.DSH_WEB_URL` **恒为空**，那条探测分支在桌面端从来就没生效过
+（`portSource` 显示 `env` 只在 `dsh web` 那种场景才可能出现）。
+
+正确来源是 `webServer.getOrigin()` —— DSH 自己就是用它算公开地址的：
+`const appRootUrl = () => publicUrl ?? ctx.webServer.getOrigin();`
+
+**测试**：新增守卫 #43 —— 断言校准存在、写回 `config.targetPort`、**位于建代理之前**、
+让位显式配置、token reader 用校准后的值。**已反向验证**：把 `getOrigin()` 换掉后
+`exit=1`，报"没有向 webServer.getOrigin() 校准目标端口"。
+
 ## [5.7.4] - 2026-10-19
 
 ### Fixed — 只开 QQ（或钉钉/纸飞机）监听时，重启后监听**整个不工作**

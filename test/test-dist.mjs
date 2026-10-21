@@ -2702,6 +2702,52 @@ await new Promise((res, rej) => {
   console.log('42. 监听定时器启动 OK（按所有通道开关统一判断 + 全关不启动 + 位于各通道恢复之后）');
 }
 
+// 43. 目标端口必须**向宿主校准**，不能靠猜（桌面版端口每次启动动态分配）
+//
+// 踩过的坑（2026-10-21，用户："换到桌面端公网和局域网链接都 502 Bad Gateway，web 端是好的"）：
+//   · 桌面版端口由宿主分配且**每次可能不同**（见过 19387、11849）
+//   · 曾靠 cordis.patch.yml 写死 targetPort: 19387 凑，换次启动就对不上 →
+//     代理转发到没人监听的端口 → 502；web 端固定 3080 所以"只有桌面端坏"
+//   · 删掉写死配置后落到 3080 兜底，同样错
+//   · 不能靠 process.env.DSH_WEB_URL：它是给 agent 的 shell 用的
+//     （DSH 文档 surfaceContext 原文："Expose DSH_WEB_URL to the agent's shell commands"），
+//     **不在插件进程环境里**，恒为空。这条也踩过。
+//   · 正解：ctx.webServer.getOrigin()（DSH 自己就用它算公开地址）
+{
+  const idx = fs.readFileSync(new URL('../lib/index.mjs', import.meta.url), 'utf8');
+  const code = idx.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '');
+
+  // ① 必须存在向 webServer 校准端口的逻辑
+  if (!/webServer\.getOrigin\(\)/.test(code)) {
+    console.error('43. 没有向 webServer.getOrigin() 校准目标端口 —— 桌面版端口每次启动都会变，写死/兜底多半是错的端口');
+    process.exit(1);
+  }
+  // ② 校准必须能覆盖 targetPort（而不是只打印）
+  if (!/config\.targetPort\s*=\s*realPort/.test(code)) {
+    console.error('43. 校准结果没有写回 config.targetPort');
+    process.exit(1);
+  }
+  // ③ 校准必须发生在建代理**之前**，否则代理已经拿着错的端口建出来了
+  const calAt = code.search(/webServer\.getOrigin\(\)/);
+  const proxyAt = code.search(/createProxyServer\(/);
+  if (proxyAt < 0) { console.error('43. 找不到 createProxyServer'); process.exit(1); }
+  if (calAt > proxyAt) {
+    console.error('43. 端口校准在建代理之后 —— 代理会带着错端口启动，502 照旧');
+    process.exit(1);
+  }
+  // ④ 显式配置的部署仍要能覆盖（不能把 config 优先级干掉）
+  if (!/portSource !== 'config'/.test(code)) {
+    console.error('43. 端口校准没有让位给显式配置（portSource === "config" 时应保留用户指定的端口）');
+    process.exit(1);
+  }
+  // ⑤ token reader 必须也用校准后的端口
+  if (!/authenticatedUrl\('http:\/\/127\.0\.0\.1:' \+ config\.targetPort\)/.test(code)) {
+    console.error('43. token reader 没用 config.targetPort —— 可能拿的是校准前的旧值');
+    process.exit(1);
+  }
+  console.log('43. 端口校准 OK（向 webServer.getOrigin() 校准 + 写回 targetPort + 在建代理之前 + 让位显式配置）');
+}
+
 proxy.close();
 target.close();
 console.log('ALL TESTS DONE');
